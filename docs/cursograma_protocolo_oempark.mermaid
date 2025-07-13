@@ -1,0 +1,131 @@
+flowchart TD
+    A[Datos de entrada] --> B[Determinar origen]
+    B --> C[TCP Client]
+    B --> D[Web/API REST Unificado]
+    B --> E[Telnet Admin]
+    B --> F[Módulo OEMPARK]
+    
+    %% Procesamiento TCP Bridge
+    C --> C1[Comando TCP raw]
+    C1 --> C2[Validar formato]
+    C2 --> C3{¿Comando completo?}
+    C3 -->|SÍ 02S0| C4[Usar dirección incluida]
+    C3 -->|NO S0| C5[Agregar dirección por defecto]
+    C4 --> C6[formatOEMPARKCommand]
+    C5 --> C6
+    C6 --> C7[STX + ADDR + CMD + PARAMS + SIB]
+    C7 --> G[Módulo OEMPARK via Serial2]
+    
+    %% Procesamiento Web/API REST Unificado
+    D --> D1[Petición HTTP]
+    D1 --> D2{¿Tipo de request?}
+    D2 -->|GET /| D3[Servir interfaz web]
+    D2 -->|POST /api/ttl| D4[Parsear JSON command]
+    D2 -->|GET /api/ttl| D5[Leer respuesta no-bloqueante]
+    D2 -->|GET /status| D6[Estado del gateway]
+    D4 --> D7[Extraer address, command, params]
+    D7 --> D8[formatOEMPARKCommand]
+    D8 --> D9[STX + ADDR + CMD + PARAMS + SIB]
+    D9 --> G
+    D5 --> D10[readOEMPARKResponse 100ms]
+    D10 --> D11[parseOEMPARKResponseToJSON]
+    
+    %% Procesamiento Telnet Admin
+    E --> E1[Comando admin]
+    E1 --> E2{¿Tipo comando?}
+    E2 -->|oempark CMD| E3[Extraer comando]
+    E2 -->|status| E4[Mostrar estado sistema]
+    E2 -->|test| E5[Ejecutar tests]
+    E3 --> E6[quickCommand]
+    E6 --> G
+    
+    %% Módulo OEMPARK
+    F --> F1[Datos Serial2 RX GPIO16]
+    F1 --> F2[readOEMPARKResponse]
+    F2 --> F3[Buscar STX 0x02]
+    F3 --> F4[Leer hasta SIB 0x0F]
+    F4 --> F5[parseOEMPARKToStruct]
+    F5 --> F6[Determinar destinos]
+    
+    F6 --> H[TCP Clients]
+    F6 --> I[API Externa]
+    F6 --> J[Telnet Admin]
+    F6 --> K[Web Interface]
+    
+    %% Respuestas a TCP
+    H --> H1[Enviar respuesta raw]
+    H1 --> H2[tcpClient.println]
+    
+    %% Respuestas a API Externa (Auto-envío)
+    I --> I1[Verificar event_type]
+    I1 --> I2{¿Es evento importante?}
+    I2 -->|SÍ| I3[formatOEMPARKForAPI]
+    I2 -->|NO| I4[Solo log local]
+    I3 --> I5[HTTP POST JSON]
+    I5 --> I6[processAPIResponse]
+    I6 --> I7{¿Comando en respuesta?}
+    I7 -->|SÍ| I8[quickCommand a OEMPARK]
+    I7 -->|NO| I9[Almacenar en buffer]
+    
+    %% Respuestas a Telnet
+    J --> J1[Mostrar en consola admin]
+    J1 --> J2[telnetClient.println]
+    
+    %% Buffer para Web Interface
+    K --> K1[Real-time console update]
+    K1 --> K2[JavaScript polling]
+    
+    %% OEMPARK recibe comandos
+    G --> G1[Serial2 TX GPIO17]
+    G1 --> G2[sendOEMPARKCommand]
+    G2 --> G3[Módulo OEMPARK procesa]
+    G3 --> G4[Genera respuesta TTL]
+    G4 --> F1
+    
+    %% Estructura de comandos OEMPARK actualizada
+    subgraph Comandos["Comandos OEMPARK Estandarizados"]
+        L1[FORMATO] --> L2["STX + ADDRESS + COMMAND + PARAMS + SIB"]
+        L3[EJEMPLOS] --> L4["STX+'02'+'S0'+SIB = Status"]
+        L5[COMANDOS] --> L6["S0=Status, A1=Address, V0=Version"]
+        L7[ACCIONES] --> L8["O1=Abrir, R1=Cerrar, K3=Autorizar"]
+        L9[STX] --> L10["0x02 (Start of Text)"]
+        L11[SIB] --> L12["0x0F (End marker)"]
+    end
+    
+    %% Estructura de respuestas OEMPARK
+    subgraph Respuestas["Respuestas OEMPARK"]
+        M1[FORMATO] --> M2["STX + ADDRESS + COMMAND + DATA + SIB"]
+        M3[STATUS] --> M4["ACK, NAK, o datos específicos"]
+        M5[PARSING] --> M6["parseOEMPARKToStruct()"]
+        M7[JSON] --> M8["parseOEMPARKResponseToJSON()"]
+        
+        N1["Ejemplo: STX+'02S01000'+SIB"] --> N2["Status OK, código 1000"]
+        N3["Ejemplo: STX+'02A102'+SIB"] --> N4["Dirección es 02"]
+        N5["Ejemplo: 'ACK'"] --> N6["Comando aceptado"]
+    end
+    
+    %% Flujo de prioridades
+    subgraph Prioridades["PRIORIDADES DE PROCESAMIENTO"]
+        P1[1. TCP Bridge] --> P2["Máxima prioridad - Tiempo real"]
+        P3[2. HTTP Client] --> P4["Auto-envío eventos críticos"]
+        P5[3. Web/API Server] --> P6["Requests HTTP unificadas"]
+        P7[4. Telnet Admin] --> P8["Diagnóstico y configuración"]
+        P9[5. OTA Updates] --> P10["Mantenimiento del sistema"]
+    end
+    
+    %% Gestión de memoria y rendimiento
+    subgraph Performance["RENDIMIENTO Y MEMORIA"]
+        Q1[Flash Usage] --> Q2["1.25MB (14%) - Excelente"]
+        Q3[RAM Static] --> Q4["52KB (16%) - Óptimo"]
+        Q5[RAM Free] --> Q6["275KB disponible"]
+        Q7[Loop Time] --> Q8["10ms máximo"]
+        Q9[Timeouts] --> Q10["OEMPARK: 3s, API: 5s"]
+    end
+    
+    style G fill:#e8f5e8
+    style D8 fill:#fff3e0
+    style F2 fill:#fff3e0
+    style I3 fill:#ffecb3
+    style G1 fill:#e1f5fe
+    style P1 fill:#ffebee
+    style Q2 fill:#e8f4f8

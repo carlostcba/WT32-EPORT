@@ -1,0 +1,160 @@
+graph TB
+    %% Entradas de datos
+    subgraph Entradas["ENTRADAS AL SISTEMA"]
+        A1[TCP Client :23]
+        A2[HTTP REST Client :80]
+        A3[Telnet Admin :2323]
+        A4[Web Browser :80]
+        A5[Módulo OEMPARK TTL]
+        A6[API Externa HTTPS]
+    end
+    
+    %% WT32-ETH01 Core
+    subgraph Core["WT32-ETH01 PROCESSING CORE"]
+        B1[TCP Bridge Handler]
+        B2[Web/API Server Unificado]
+        B3[Telnet Handler]
+        B4[HTTP Client Handler]
+        B5[OEMPARK Protocol Parser]
+        B6[Configuration Manager]
+        B7[Security Module]
+        B8[OTA Update Handler]
+    end
+    
+    %% OEMPARK Interface
+    subgraph OEMPARK["OEMPARK TTL INTERFACE"]
+        C1[Serial2 TX Buffer GPIO17]
+        C2[Serial2 RX Buffer GPIO16]
+        C3[STX+ADDR+CMD+SIB Formatter]
+        C4[OEMPARK Response Parser]
+        C5[Protocol Validator]
+        C6[Command Queue Manager]
+    end
+    
+    %% Salidas del sistema
+    subgraph Salidas["SALIDAS DEL SISTEMA"]
+        D1[TCP Raw Response]
+        D2[HTTP JSON Response]
+        D3[Telnet Text Response]
+        D4[Web UI Updates]
+        D5[OEMPARK TTL Commands]
+        D6[External API POST]
+        D7[System Log Messages]
+        D8[OTA Status]
+    end
+    
+    %% Flujos principales actualizados
+    A1 -->|Raw Commands| B1
+    A2 -->|JSON/REST API| B2
+    A3 -->|Admin Commands| B3
+    A4 -->|Web Interface| B2
+    A5 -->|TTL Responses| B5
+    A6 -->|API Commands/Actions| B4
+    
+    B1 -->|Format TTL| C3
+    B2 -->|Parse Commands| C3
+    B3 -->|Admin to TTL| C3
+    B4 -->|API to TTL| C3
+    
+    C3 --> C1
+    C2 --> C4
+    C4 --> B5
+    
+    B5 -->|JSON Format| D2
+    B5 -->|Raw Data| D1
+    B5 -->|Text Format| D3
+    B5 -->|Real-time| D4
+    B5 -->|Auto-send| B4
+    
+    B1 --> D1
+    B2 --> D2
+    B2 --> D4
+    B3 --> D3
+    B4 --> D6
+    C1 --> D5
+    B8 --> D8
+    
+    %% Flujos de configuración
+    B6 -->|Settings| B1
+    B6 -->|Settings| B2
+    B6 -->|Settings| B4
+    B7 -->|Security| B4
+    B7 -->|Validation| C5
+    
+    %% Flujos bidireccionales críticos
+    A5 -.->|Auto-detect| B4
+    B4 -.->|Commands| C1
+    A6 -.->|Actions| C1
+    
+    %% Estados del sistema actualizados
+    subgraph Estados["ESTADOS Y BUFFERS"]
+        E1[TCP Connection Pool]
+        E2[Unified Server Buffer]
+        E3[Configuration Cache SPIFFS]
+        E4[Security Keys]
+        E5[OEMPARK Command Queue]
+        E6[System Log Buffer]
+        E7[OTA Update Status]
+    end
+    
+    B1 <--> E1
+    B2 <--> E2
+    B4 <--> E2
+    B6 <--> E3
+    B7 <--> E4
+    C6 <--> E5
+    B8 <--> E7
+    
+    %% Protocolo OEMPARK específico
+    subgraph ProtocolDetails["PROTOCOLO OEMPARK DETALLADO"]
+        F1[STX 0x02] --> F2[Address 02]
+        F2 --> F3[Command S0/A1/O1/K3]
+        F3 --> F4[Parameters]
+        F4 --> F5[SIB 0x0F]
+        
+        G1[Response STX] --> G2[Address+Command]
+        G2 --> G3[Status/Data]
+        G3 --> G4[SIB]
+        G4 --> G5[JSON Conversion]
+    end
+    
+    %% Timing y concurrencia actualizado
+    subgraph Timing["TIMING Y CONCURRENCIA"]
+        I1[Loop Principal 10ms]
+        I2[TCP Check Continuo]
+        I3[HTTP Timeout 5s]
+        I4[Heartbeat 30s]
+        I5[Config Auto-save SPIFFS]
+        I6[Memory Check 5min]
+        I7[OEMPARK Response 3s]
+    end
+    
+    %% Manejo de errores actualizado
+    subgraph Errores["MANEJO DE ERRORES"]
+        J1[TCP Connection Lost]
+        J2[OEMPARK Timeout]
+        J3[API HTTP Error]
+        J4[Memory Low Warning]
+        J5[Config SPIFFS Error]
+        J6[Security Validation Fail]
+        J7[OTA Update Error]
+        J8[Ethernet Link Down]
+    end
+    
+    J1 --> B1
+    J2 --> B5
+    J3 --> B4
+    J4 --> B6
+    J5 --> B6
+    J6 --> B7
+    J7 --> B8
+    J8 --> Core
+    
+    %% Estilos actualizados
+    style A5 fill:#e8f5e8
+    style B5 fill:#fff3e0
+    style C1 fill:#ffecb3
+    style C2 fill:#ffecb3
+    style D5 fill:#e8f5e8
+    style E2 fill:#f3e5f5
+    style B2 fill:#e1f5fe

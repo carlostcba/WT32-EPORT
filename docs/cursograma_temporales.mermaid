@@ -1,0 +1,145 @@
+sequenceDiagram
+    participant TC as TCP Client
+    participant WT as WT32-ETH01 Gateway
+    participant OEMP as Módulo OEMPARK
+    participant API as External API
+    participant WEB as Web Browser
+    
+    Note over WT: INICIO DEL SISTEMA
+    WT->>WT: Boot ESP32 (2s)
+    WT->>WT: Load Config SPIFFS (100ms)
+    WT->>WT: Setup Ethernet (5-30s)
+    WT->>WT: Init Serial2 TTL GPIO16/17 (100ms)
+    WT->>WT: Start Unified Web/API Server (500ms)
+    WT->>OEMP: Test Command: STX+02S0+SIB
+    OEMP-->>WT: Response: 02S01000
+    
+    Note over WT: LOOP PRINCIPAL (cada 10ms)
+    
+    rect rgb(230, 245, 230)
+        Note over TC,OEMP: FLUJO TCP BRIDGE (Prioridad 1)
+        TC->>+WT: TCP Connect :23
+        WT-->>TC: Welcome Message + Instructions
+        TC->>WT: Raw Command: "S0"
+        WT->>WT: formatOEMPARKCommand("02", "S0", "")
+        WT->>WT: Create: STX+"02S0"+SIB
+        WT->>OEMP: Serial2 TX: STX+02S0+SIB
+        Note over OEMP: Process Command (10-100ms)
+        OEMP->>WT: Serial2 RX: STX+02S01000+SIB
+        WT->>WT: readOEMPARKResponse(3000ms)
+        WT->>-TC: TCP Response: "02S01000"
+    end
+    
+    rect rgb(255, 243, 224)
+        Note over WEB,OEMP: FLUJO WEB/API UNIFICADO (Prioridad 3)
+        WEB->>+WT: POST /api/ttl {"command":"S0"}
+        WT->>WT: Parse JSON (5ms)
+        WT->>WT: formatOEMPARKCommand("02", "S0", "")
+        WT->>OEMP: Serial2 TX: STX+02S0+SIB
+        Note over WT,OEMP: Wait Response (timeout 3s)
+        OEMP->>WT: Serial2 RX: STX+02S01000+SIB
+        WT->>WT: parseOEMPARKResponseToJSON() (3ms)
+        WT->>-WEB: HTTP 200 {"address":"02","command":"S0","data":"1000",...}
+        
+        WEB->>+WT: GET / (Web Interface)
+        WT->>-WEB: HTML Page with JavaScript (50ms)
+        
+        WEB->>WT: GET /api/ttl (Polling every 2s)
+        WT->>WT: readOEMPARKResponse(100ms) Non-blocking
+        WT->>WEB: JSON Response or 204 No Data
+    end
+    
+    rect rgb(255, 236, 179)
+        Note over OEMP,API: FLUJO CLIENTE HTTP AUTO (Prioridad 2)
+        OEMP->>+WT: Serial2 RX: Card Event Data
+        WT->>WT: parseOEMPARKToStruct() (3ms)
+        WT->>WT: Check event_type importance
+        WT->>WT: formatOEMPARKForAPI() (10ms)
+        WT->>API: HTTPS POST {"device_id":"...","event_type":"card_read",...}
+        Note over API: Process Event (100-2000ms)
+        API->>WT: HTTP 200 {"action":"authorize_entry"}
+        WT->>WT: processAPIResponse() (5ms)
+        WT->>WT: Map action to quickCommand("K3")
+        WT->>-OEMP: Serial2 TX: STX+02K3+SIB
+    end
+    
+    rect rgb(243, 229, 245)
+        Note over WEB,WT: FLUJO TELNET ADMIN
+        WEB->>+WT: Telnet Connect :2323
+        WT->>WEB: Admin Welcome + Help
+        WEB->>WT: "oempark S0"
+        WT->>WT: quickCommand("S0")
+        WT->>OEMP: Serial2 TX: STX+02S0+SIB
+        OEMP->>WT: Response
+        WT->>WEB: Formatted Response + Interpretation
+        
+        WEB->>WT: "status"
+        WT->>WT: printTCPStats() + System Info
+        WT->>-WEB: Complete System Status
+    end
+    
+    rect rgb(255, 235, 238)
+        Note over WEB,WT: FLUJO OTA UPDATE
+        WEB->>+WT: POST /update (firmware.bin)
+        WT->>WT: Update.begin()
+        Note over WT: Write Firmware Chunks (30-120s)
+        WT->>WT: Update.end() + Verify
+        WT->>WEB: Update Success/Fail
+        WT->>-WT: ESP.restart()
+    end
+    
+    Note over WT: TAREAS PERIÓDICAS
+    
+    rect rgb(241, 248, 233)
+        Note over WT: HEARTBEAT (every 30s)
+        WT->>WT: Check Memory Usage (ESP.getFreeHeap())
+        WT->>WT: Check TCP Connections (isTCPClientConnected())
+        WT->>WT: Check Ethernet Link (ETH.linkUp())
+        WT->>WT: Log System Status + Performance
+        WT->>WT: Update Monitoring Metrics
+    end
+    
+    rect rgb(227, 242, 253)
+        Note over WT: ERROR HANDLING
+        Note over OEMP: OEMPARK Timeout (3s)
+        OEMP--xWT: No Response to Command
+        WT->>WT: Log "OEMPARK Timeout"
+        WT->>TC: "TIMEOUT: Sin respuesta del módulo OEMPARK"
+        
+        Note over API: API Error (HTTP 500)
+        API--xWT: Error Response
+        WT->>WT: Log API Error + HTTP Code
+        WT->>WT: Continue Operation (No retry for auto-send)
+        
+        Note over WT: Memory Low (<20KB)
+        WT->>WT: Log Memory Warning
+        WT->>WT: Check consecutiveErrors counter
+        WT->>WT: ESP.restart() if critical
+    end
+    
+    Note over WT: TIMING CONSTRAINTS ACTUALIZADOS
+    Note right of WT: Loop Cycle: 10ms max
+    Note right of WT: TCP Response: <100ms  
+    Note right of WT: OEMPARK Timeout: 3s
+    Note right of WT: HTTP Timeout: 5s
+    Note right of WT: Web Response: <200ms
+    Note right of WT: Config Save SPIFFS: <100ms
+    Note right of WT: Memory Check: 5min interval
+    Note right of WT: Heartbeat: 30s interval
+    
+    Note over WT: PERFORMANCE METRICS MEDIDOS
+    Note right of WT: Flash Usage: 1.25MB (14%)
+    Note right of WT: RAM Static: 52KB (16%)
+    Note right of WT: RAM Free: 275KB available
+    Note right of WT: Network Latency: <50ms
+    Note right of WT: Serial TTL: 9600-115200 bps
+    Note right of WT: Concurrent TCP: 1 active
+    Note right of WT: HTTP Requests: 100+/min capable
+    
+    Note over WT: PROTOCOLO OEMPARK DETALLE
+    Note right of WT: Format: STX(0x02)+ADDR+CMD+PARAMS+SIB(0x0F)
+    Note right of WT: Validation: isValidOEMPARKCommand()
+    Note right of WT: Parsing: parseOEMPARKToStruct()
+    Note right of WT: JSON Convert: parseOEMPARKResponseToJSON()
+    Note right of WT: Quick Commands: quickCommand(cmd)
+    Note right of WT: Address Default: config.oempark_address
